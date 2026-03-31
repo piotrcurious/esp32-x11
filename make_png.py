@@ -10,11 +10,12 @@ def make_png(width, height, data):
         for x in range(width):
             idx = (y * width + x) * 4
             if idx + 2 >= len(data):
-                b, g, r = 0, 0, 0
+                b, g, r, a = 0, 0, 0, 255
             else:
                 b = data[idx]
                 g = data[idx+1]
                 r = data[idx+2]
+                a = data[idx+3] if idx+3 < len(data) else 255
             pixel_data.extend([r, g, b])
 
     def make_chunk(type, content):

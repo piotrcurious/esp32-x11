@@ -8,7 +8,6 @@
 SerialClass Serial;
 WiFiClass WiFi;
 
-// The global variables are defined in esp32_x11.ino
 #include "esp32_x11.ino"
 
 int main() {
@@ -16,16 +15,16 @@ int main() {
     setup();
     Serial.println("setup() returned");
 
-    // Run loop a few times to let the window map and expose
-    for (int i = 0; i < 50; ++i) {
+    // Run loop many times
+    for (int i = 0; i < 100; ++i) {
         loop();
-        usleep(100000); // 100ms
+        usleep(10000); // 10ms
     }
 
     // Take a screenshot of the window
-    int w = 100;
+    int w = 200;
     int h = 100;
-    Serial.println("Taking screenshot of the window...");
+    Serial.println("Taking screenshot of the created window...");
     XImage *img = XGetImage(display, window, 0, 0, w, h, 0xFFFFFFFF, ZPixmap);
     if (img) {
         Serial.println("Screenshot taken, saving to screenshot.raw");
@@ -37,11 +36,8 @@ int main() {
         // Convert to PNG using the python script
         char cmd[256];
         sprintf(cmd, "python3 make_png.py %d %d screenshot.raw screenshot.png", w, h);
-        Serial.print("Running command: "); Serial.println(cmd);
         if (system(cmd) == 0) {
             Serial.println("Screenshot converted to screenshot.png");
-        } else {
-            Serial.println("Failed to convert screenshot to PNG");
         }
     } else {
         Serial.println("Failed to take screenshot");

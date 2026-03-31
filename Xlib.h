@@ -141,6 +141,7 @@ struct _XDisplay {
     char *buffer;
     char *bufptr;
     int buffer_size;
+    GC default_gc;
 };
 
 #ifdef __cplusplus
@@ -161,6 +162,7 @@ int XSelectInput(Display *display, Window w, long event_mask);
 
 XFontStruct *XLoadQueryFont(Display *display, const char *name);
 int XDrawString(Display *display, Drawable d, GC gc, int x, int y, const char *string, int length);
+int XFillRectangle(Display *display, Drawable d, GC gc, int x, int y, unsigned int width, unsigned int height);
 int XSetForeground(Display *display, GC gc, unsigned long foreground);
 int XSetFont(Display *display, GC gc, Font font);
 
@@ -169,13 +171,14 @@ int XDestroyImage(XImage *image);
 
 int XGetWindowAttributes(Display *display, Window w, XWindowAttributes *window_attributes_return);
 int XTextWidth(XFontStruct *font_struct, const char *string, int count);
+GC XDefaultGC(Display *display, int screen_number);
 
 // Macros for compatibility
 #define DefaultScreen(dpy) ((dpy)->default_screen_no)
 #define RootWindow(dpy, scr) ((dpy)->screens[scr].root)
 #define WhitePixel(dpy, scr) ((dpy)->screens[scr].white_pixel)
 #define BlackPixel(dpy, scr) ((dpy)->screens[scr].black_pixel)
-#define DefaultGC(dpy, scr) ((GC)1)
+#define DefaultGC(dpy, scr) XDefaultGC(dpy, scr)
 
 #define ZPixmap 2
 

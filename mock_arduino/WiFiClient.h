@@ -61,7 +61,7 @@ public:
             if (n > 0) {
                 total += n;
             } else if (n < 0) {
-                if (errno == EINTR || errno == EAGAIN) continue;
+                if (errno == EINTR) continue;
                 break;
             } else {
                 break; // EOF

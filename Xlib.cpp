@@ -77,21 +77,17 @@ Display *XOpenDisplay(const char *display_name) {
     setup[4] = 0; // Minor
     dpy->client->write(setup, 12);
 
-    // Read Response
+    // Read Response Header
     uint8_t resp[8];
     if (dpy->client->readBytes((char*)resp, 8) != 8) {
-        std::cout << "Failed to read setup response" << std::endl;
-        delete dpy->client;
-        free(dpy->buffer);
-        free(dpy);
+        std::cout << "Failed to read setup response header" << std::endl;
+        XCloseDisplay(dpy);
         return NULL;
     }
 
     if (resp[0] != 1) {
         std::cout << "Connection rejected: " << (int)resp[0] << std::endl;
-        delete dpy->client;
-        free(dpy->buffer);
-        free(dpy);
+        XCloseDisplay(dpy);
         return NULL;
     }
 
@@ -99,20 +95,19 @@ Display *XOpenDisplay(const char *display_name) {
     int full_len = length * 4;
     uint8_t *data = (uint8_t*)malloc(full_len);
     if (!data) {
-        delete dpy->client;
-        free(dpy->buffer);
-        free(dpy);
+        XCloseDisplay(dpy);
         return NULL;
     }
     dpy->client->readBytes((char*)data, full_len);
 
+    // Correct indices for connection setup data (header excluded)
     dpy->resource_base = *(uint32_t*)(data + 4);
     dpy->resource_mask = *(uint32_t*)(data + 8);
     dpy->resource_id = dpy->resource_base;
 
     uint16_t vendor_len = *(uint16_t*)(data + 16);
-    uint8_t num_screens = data[24];
-    uint8_t num_formats = data[25];
+    uint8_t num_screens = data[20]; // Corrected from 24
+    uint8_t num_formats = data[21]; // Corrected from 25
 
     uint8_t *p = data + 32;
     p += ((vendor_len + 3) & ~3); // skip vendor
@@ -122,16 +117,15 @@ Display *XOpenDisplay(const char *display_name) {
     dpy->screens = (Screen *)malloc(sizeof(Screen) * dpy->nscreens);
     if (!dpy->screens) {
         free(data);
-        delete dpy->client;
-        free(dpy->buffer);
-        free(dpy);
+        XCloseDisplay(dpy);
         return NULL;
     }
 
     for (int i = 0; i < dpy->nscreens; i++) {
-        dpy->screens[i].root = *(uint32_t*)p;
-        dpy->screens[i].white_pixel = *(uint32_t*)(p + 12);
-        dpy->screens[i].black_pixel = *(uint32_t*)(p + 16);
+        uint32_t* screen_data = (uint32_t*)p;
+        dpy->screens[i].root = screen_data[0];
+        dpy->screens[i].white_pixel = screen_data[2]; // Corrected from 3
+        dpy->screens[i].black_pixel = screen_data[3]; // Corrected from 4
         dpy->screens[i].depth = p[38];
 
         uint8_t n_depths = p[39];
@@ -142,16 +136,17 @@ Display *XOpenDisplay(const char *display_name) {
         }
     }
 
+    if (screen_num >= dpy->nscreens) screen_num = 0;
     dpy->default_screen_no = screen_num;
     free(data);
-    std::cout << "X11 Display opened successfully." << std::endl;
+    std::cout << "X11 Display opened successfully. Root window: 0x" << std::hex << dpy->screens[dpy->default_screen_no].root << std::dec << std::endl;
     return dpy;
 }
 
 Window XCreateSimpleWindow(Display *dpy, Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int border_width, unsigned long border, unsigned long background) {
     Window w = _XAllocID(dpy);
     uint32_t req[8 + 2];
-    req[0] = (X_CreateWindow) | (10 << 16);
+    req[0] = (X_CreateWindow) | (dpy->screens[dpy->default_screen_no].depth << 8) | (10 << 16);
     req[1] = (uint32_t)w;
     req[2] = (uint32_t)parent;
     req[3] = (x & 0xFFFF) | (y << 16);
@@ -242,14 +237,14 @@ int XSetForeground(Display *dpy, GC gc, unsigned long foreground) {
     req[0] = X_ChangeGC | (4 << 16);
     req[1] = (uint32_t)(uintptr_t)gc;
     req[2] = 0x04; // foreground
-    req[3] = foreground;
+    req[3] = (uint32_t)foreground;
     // Mock CreateGC if gc is 1
     static bool gc_initialized = false;
     if (!gc_initialized) {
         uint32_t creq[4];
         creq[0] = X_CreateGC | (4 << 16);
         creq[1] = (uint32_t)(uintptr_t)gc;
-        creq[2] = dpy->screens[0].root;
+        creq[2] = dpy->screens[dpy->default_screen_no].root;
         creq[3] = 0;
         dpy->client->write((uint8_t *)creq, 16);
         gc_initialized = true;
@@ -263,7 +258,7 @@ int XSetFont(Display *dpy, GC gc, Font font) {
     req[0] = X_ChangeGC | (4 << 16);
     req[1] = (uint32_t)(uintptr_t)gc;
     req[2] = 0x4000; // font
-    req[3] = font;
+    req[3] = (uint32_t)font;
     dpy->client->write((uint8_t *)req, 16);
     return 1;
 }
@@ -277,52 +272,44 @@ XImage *XGetImage(Display *dpy, Drawable d, int x, int y, unsigned int width, un
     req[3] = (width & 0xFFFF) | (height << 16);
     req[4] = (uint32_t)plane_mask;
 
-    std::cout << "XGetImage: sending request" << std::endl;
+    std::cout << "XGetImage: sending request for Drawable 0x" << std::hex << d << std::dec << " (" << width << "x" << height << ")" << std::endl;
     dpy->client->write((uint8_t *)req, 20);
 
-    uint8_t reply[32];
-    if (dpy->client->readBytes((char*)reply, 32) != 32) {
-        std::cout << "XGetImage: failed to read reply" << std::endl;
-        return NULL;
-    }
+    while (true) {
+        uint8_t reply[32];
+        if (dpy->client->readBytes((char*)reply, 32) != 32) {
+             std::cout << "XGetImage: failed to read 32 byte reply" << std::endl;
+             return NULL;
+        }
 
-    uint32_t length = *(uint32_t*)(reply + 4);
-    int data_len = length * 4;
-    std::cout << "XGetImage: reply length " << length << " (data length " << data_len << " bytes)" << std::endl;
-    if (data_len == 0) return NULL;
-
-    char *data = (char*)malloc(data_len);
-    if (!data) return NULL;
-
-    int read_total = 0;
-    while(read_total < data_len) {
-        int n = dpy->client->read((uint8_t*)(data + read_total), data_len - read_total);
-        if (n > 0) {
-            read_total += n;
-        } else if (n < 0) {
-             if (errno == EINTR || errno == EAGAIN) {
-                 usleep(1000);
-                 continue;
-             }
-             std::cout << "XGetImage: read error " << errno << std::endl;
-             break;
+        if (reply[0] == 1) { // Reply
+            uint32_t length = *(uint32_t*)(reply + 4);
+            int data_len = length * 4;
+            std::cout << "XGetImage: reply received, data length " << data_len << " bytes" << std::endl;
+            if (data_len == 0) return NULL;
+            char *data = (char*)malloc(data_len);
+            if (!data) return NULL;
+            int read_total = 0;
+            while (read_total < data_len) {
+                int n = dpy->client->read((uint8_t*)(data + read_total), data_len - read_total);
+                if (n > 0) read_total += n;
+                else if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+                     usleep(100);
+                     continue;
+                } else break;
+            }
+            std::cout << "XGetImage: read " << read_total << " bytes total" << std::endl;
+            XImage *img = (XImage*)malloc(sizeof(XImage));
+            img->width = width; img->height = height; img->data = data;
+            img->depth = reply[1]; img->bits_per_pixel = 32; img->bytes_per_line = width * 4;
+            return img;
+        } else if (reply[0] == 0) { // Error
+            std::cout << "XGetImage: server returned error code=" << (int)reply[1] << " opcode=" << (int)reply[10] << " resourceID=0x" << std::hex << *(uint32_t*)(reply+4) << std::dec << std::endl;
+            return NULL;
         } else {
-            // EOF usually shouldn't happen unless server closed connection
-            usleep(1000);
-            static int eof_count = 0;
-            if (++eof_count > 100) break;
+             // Event
         }
     }
-    std::cout << "XGetImage: read " << read_total << " bytes total" << std::endl;
-
-    XImage *img = (XImage*)malloc(sizeof(XImage));
-    img->width = width;
-    img->height = height;
-    img->data = data;
-    img->depth = reply[1];
-    img->bits_per_pixel = 32;
-    img->bytes_per_line = width * 4;
-    return img;
 }
 
 int XDestroyImage(XImage *img) {
@@ -340,9 +327,7 @@ int XPending(Display *dpy) {
 int XNextEvent(Display *dpy, XEvent *event) {
     uint8_t buf[32];
     int n = dpy->client->readBytes((char*)buf, 32);
-    if (n != 32) {
-        return 0;
-    }
+    if (n != 32) return 0;
     event->type = buf[0] & 0x7F;
     if (event->type == Expose) {
         event->xexpose.window = *(uint32_t*)(buf + 4);

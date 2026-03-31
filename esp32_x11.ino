@@ -59,13 +59,13 @@ void setupX11() {
   gc = DefaultGC(display, my_screen);
 
   Serial.println("Creating window...");
-  // Create a simple window with black background and white border
+  // Create a simple window with white background and black border
   window = XCreateSimpleWindow(display, RootWindow(display, my_screen),
     10, 10, // x, y position
     200, 100, // width, height
     1, // border width
-    WhitePixel(display, my_screen), // border color
-    BlackPixel(display, my_screen)); // background color
+    BlackPixel(display, my_screen), // border color
+    WhitePixel(display, my_screen)); // background color
 
   Serial.println("Storing name...");
   // Set the window title and select the events to handle
@@ -91,8 +91,8 @@ void setupX11() {
 
 // Draw text on the window
 void drawText(const char* text) {
-  // Set the foreground color to white and draw the text
-  XSetForeground(display, gc, WhitePixel(display, my_screen));
+  // Set the foreground color to black and draw the text on white background
+  XSetForeground(display, gc, BlackPixel(display, my_screen));
   XDrawString(display, window, gc, 50, 50, text, strlen(text));
 }
 
@@ -103,7 +103,7 @@ void handleX11Events() {
    if (display == NULL) return;
 
    // Check if there is an event in the queue
-   if (XPending(display) > 0) {
+   while (XPending(display) > 0) {
      // Get the next event
      XNextEvent(display, &event);
 
@@ -111,7 +111,8 @@ void handleX11Events() {
      switch (event.type) {
        case Expose:
          // The window needs to be redrawn
-         drawText("Hello world");
+         Serial.println("Expose event received");
+         drawText("Hello world!");
          break;
        case KeyPress:
          // A key was pressed

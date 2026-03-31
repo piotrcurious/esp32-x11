@@ -100,20 +100,23 @@ Display *XOpenDisplay(const char *display_name) {
     }
     dpy->client->readBytes((char*)data, full_len);
 
-    // Correct indices for connection setup data (header excluded)
+    // Correct indices for connection setup data
     dpy->resource_base = *(uint32_t*)(data + 4);
     dpy->resource_mask = *(uint32_t*)(data + 8);
     dpy->resource_id = dpy->resource_base;
 
     uint16_t vendor_len = *(uint16_t*)(data + 16);
-    uint8_t num_screens = data[20]; // Corrected from 24
-    uint8_t num_formats = data[21]; // Corrected from 25
+    uint8_t num_roots = data[20];
+    uint8_t num_formats = data[21];
+
+    std::cout << "Resource Base: 0x" << std::hex << dpy->resource_base << " Mask: 0x" << dpy->resource_mask << std::dec << std::endl;
+    std::cout << "Vendor length: " << vendor_len << " Roots: " << (int)num_roots << " Formats: " << (int)num_formats << std::endl;
 
     uint8_t *p = data + 32;
     p += ((vendor_len + 3) & ~3); // skip vendor
     p += (num_formats * 8); // skip formats
 
-    dpy->nscreens = num_screens;
+    dpy->nscreens = num_roots;
     dpy->screens = (Screen *)malloc(sizeof(Screen) * dpy->nscreens);
     if (!dpy->screens) {
         free(data);
@@ -122,11 +125,16 @@ Display *XOpenDisplay(const char *display_name) {
     }
 
     for (int i = 0; i < dpy->nscreens; i++) {
-        uint32_t* screen_data = (uint32_t*)p;
-        dpy->screens[i].root = screen_data[0];
-        dpy->screens[i].white_pixel = screen_data[2]; // Corrected from 3
-        dpy->screens[i].black_pixel = screen_data[3]; // Corrected from 4
+        uint32_t* s = (uint32_t*)p;
+        dpy->screens[i].root = s[0];
+        dpy->screens[i].white_pixel = s[2];
+        dpy->screens[i].black_pixel = s[3];
         dpy->screens[i].depth = p[38];
+
+        std::cout << "Screen " << i << " Root: 0x" << std::hex << dpy->screens[i].root
+                  << " White: 0x" << dpy->screens[i].white_pixel
+                  << " Black: 0x" << dpy->screens[i].black_pixel
+                  << " Depth: " << std::dec << (int)dpy->screens[i].depth << std::endl;
 
         uint8_t n_depths = p[39];
         p += 40;
@@ -138,22 +146,32 @@ Display *XOpenDisplay(const char *display_name) {
 
     if (screen_num >= dpy->nscreens) screen_num = 0;
     dpy->default_screen_no = screen_num;
+
+    // Create default GC
+    dpy->default_gc = (GC)(uintptr_t)_XAllocID(dpy);
+    uint32_t creq[4];
+    creq[0] = X_CreateGC | (4 << 16);
+    creq[1] = (uint32_t)(uintptr_t)dpy->default_gc;
+    creq[2] = dpy->screens[dpy->default_screen_no].root;
+    creq[3] = 0;
+    dpy->client->write((uint8_t *)creq, 16);
+
     free(data);
-    std::cout << "X11 Display opened successfully. Root window: 0x" << std::hex << dpy->screens[dpy->default_screen_no].root << std::dec << std::endl;
+    std::cout << "X11 Display opened successfully. Default GC: 0x" << std::hex << (uintptr_t)dpy->default_gc << std::dec << std::endl;
     return dpy;
 }
 
 Window XCreateSimpleWindow(Display *dpy, Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int border_width, unsigned long border, unsigned long background) {
     Window w = _XAllocID(dpy);
-    uint32_t req[8 + 2];
+    uint32_t req[10];
     req[0] = (X_CreateWindow) | (dpy->screens[dpy->default_screen_no].depth << 8) | (10 << 16);
     req[1] = (uint32_t)w;
     req[2] = (uint32_t)parent;
-    req[3] = (x & 0xFFFF) | (y << 16);
+    req[3] = (x & 0x7FFF) | ((y & 0x7FFF) << 16);
     req[4] = (width & 0xFFFF) | (height << 16);
     req[5] = (border_width & 0xFFFF) | (1 << 16); // InputOutput
     req[6] = 0; // Visual
-    req[7] = 0x03; // background-pixel | border-pixel
+    req[7] = 0x0A; // background-pixel (0x02) | border-pixel (0x08)
     req[8] = (uint32_t)background;
     req[9] = (uint32_t)border;
     dpy->client->write((uint8_t *)req, 40);
@@ -203,7 +221,7 @@ XFontStruct *XLoadQueryFont(Display *dpy, const char *name) {
     uint32_t *req = (uint32_t *)calloc(req_len, 4);
     req[0] = X_OpenFont | (req_len << 16);
     req[1] = (uint32_t)fid;
-    req[2] = (uint32_t)len;
+    req[2] = (uint16_t)len; // name-length in first 2 bytes, next 2 unused
     memcpy(&req[3], name, len);
     dpy->client->write((uint8_t *)req, req_len * 4);
     free(req);
@@ -215,14 +233,28 @@ XFontStruct *XLoadQueryFont(Display *dpy, const char *name) {
     return fs;
 }
 
+#define X_PolyFillRectangle 70
+
+int XFillRectangle(Display *dpy, Drawable d, GC gc, int x, int y, unsigned int width, unsigned int height) {
+    uint32_t req[5];
+    req[0] = X_PolyFillRectangle | (5 << 16);
+    req[1] = (uint32_t)d;
+    req[2] = (uint32_t)(uintptr_t)gc;
+    req[3] = (x & 0x7FFF) | ((y & 0x7FFF) << 16);
+    req[4] = (width & 0xFFFF) | (height << 16);
+    dpy->client->write((uint8_t *)req, 20);
+    return 1;
+}
+
 int XDrawString(Display *dpy, Drawable d, GC gc, int x, int y, const char *string, int length) {
-    int pad = (4 - (length & 3)) & 3;
-    int req_len = 4 + (length + pad) / 4;
+    if (length > 254) length = 254; // Keep it simple for now
+    int total_bytes = 16 + 2 + length;
+    int req_len = (total_bytes + 3) / 4;
     uint32_t *req = (uint32_t *)calloc(req_len, 4);
     req[0] = X_PolyText8 | (req_len << 16);
     req[1] = (uint32_t)d;
     req[2] = (uint32_t)(uintptr_t)gc;
-    req[3] = (x & 0xFFFF) | (y << 16);
+    req[3] = (x & 0x7FFF) | ((y & 0x7FFF) << 16);
     uint8_t *p = (uint8_t*)&req[4];
     *p++ = (uint8_t)length;
     *p++ = 0; // delta
@@ -238,17 +270,6 @@ int XSetForeground(Display *dpy, GC gc, unsigned long foreground) {
     req[1] = (uint32_t)(uintptr_t)gc;
     req[2] = 0x04; // foreground
     req[3] = (uint32_t)foreground;
-    // Mock CreateGC if gc is 1
-    static bool gc_initialized = false;
-    if (!gc_initialized) {
-        uint32_t creq[4];
-        creq[0] = X_CreateGC | (4 << 16);
-        creq[1] = (uint32_t)(uintptr_t)gc;
-        creq[2] = dpy->screens[dpy->default_screen_no].root;
-        creq[3] = 0;
-        dpy->client->write((uint8_t *)creq, 16);
-        gc_initialized = true;
-    }
     dpy->client->write((uint8_t *)req, 16);
     return 1;
 }
@@ -342,6 +363,10 @@ int XGetWindowAttributes(Display *dpy, Window w, XWindowAttributes *wa) {
 
 int XTextWidth(XFontStruct *fs, const char *s, int len) {
     return len * 8;
+}
+
+GC XDefaultGC(Display *dpy, int screen_number) {
+    return dpy->default_gc;
 }
 
 int XCloseDisplay(Display *dpy) {

@@ -91,7 +91,10 @@ void setupX11() {
 
 // Draw text on the window
 void drawText(const char* text) {
-  // Set the foreground color to black and draw the text on white background
+  // Clear the window with white background
+  XSetForeground(display, gc, WhitePixel(display, my_screen));
+  XFillRectangle(display, window, gc, 0, 0, 200, 100);
+  // Set the foreground color to black and draw the text
   XSetForeground(display, gc, BlackPixel(display, my_screen));
   XDrawString(display, window, gc, 50, 50, text, strlen(text));
 }

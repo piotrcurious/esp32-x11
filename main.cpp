@@ -16,16 +16,16 @@ int main() {
     Serial.println("setup() returned");
 
     // Run loop many times
-    for (int i = 0; i < 200; ++i) {
+    for (int i = 0; i < 100; ++i) {
         loop();
-        usleep(20000); // 20ms
+        usleep(10000); // 10ms
     }
 
-    // Take a screenshot of the ROOT window
-    int w = 800;
-    int h = 600;
-    Serial.println("Taking screenshot of the root window...");
-    XImage *img = XGetImage(display, RootWindow(display, my_screen), 0, 0, w, h, 0xFFFFFFFF, ZPixmap);
+    // Take a screenshot of the window
+    int w = 200;
+    int h = 100;
+    Serial.println("Taking screenshot of the created window...");
+    XImage *img = XGetImage(display, window, 0, 0, w, h, 0xFFFFFFFF, ZPixmap);
     if (img) {
         Serial.println("Screenshot taken, saving to screenshot.raw");
         std::ofstream f("screenshot.raw", std::ios::binary);

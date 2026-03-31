@@ -100,6 +100,23 @@ typedef struct {
 } XWindowAttributes;
 
 typedef struct {
+    int width, height;
+    int xoffset;
+    int format;
+    char *data;
+    int byte_order;
+    int bitmap_unit;
+    int bitmap_bit_order;
+    int bitmap_pad;
+    int depth;
+    int bytes_per_line;
+    int bits_per_pixel;
+    unsigned long red_mask;
+    unsigned long green_mask;
+    unsigned long blue_mask;
+} XImage;
+
+typedef struct {
     Window root;
     unsigned long white_pixel;
     unsigned long black_pixel;
@@ -147,6 +164,9 @@ int XDrawString(Display *display, Drawable d, GC gc, int x, int y, const char *s
 int XSetForeground(Display *display, GC gc, unsigned long foreground);
 int XSetFont(Display *display, GC gc, Font font);
 
+XImage *XGetImage(Display *display, Drawable d, int x, int y, unsigned int width, unsigned int height, unsigned long plane_mask, int format);
+int XDestroyImage(XImage *image);
+
 int XGetWindowAttributes(Display *display, Window w, XWindowAttributes *window_attributes_return);
 int XTextWidth(XFontStruct *font_struct, const char *string, int count);
 
@@ -156,6 +176,8 @@ int XTextWidth(XFontStruct *font_struct, const char *string, int count);
 #define WhitePixel(dpy, scr) ((dpy)->screens[scr].white_pixel)
 #define BlackPixel(dpy, scr) ((dpy)->screens[scr].black_pixel)
 #define DefaultGC(dpy, scr) ((GC)1)
+
+#define ZPixmap 2
 
 #ifdef __cplusplus
 }

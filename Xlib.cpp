@@ -15,6 +15,7 @@
 #define X_QueryFont 47
 #define X_CreateGC 55
 #define X_ChangeGC 56
+#define X_GetImage 73
 #define X_PolyText8 74
 #define X_CloseDisplay 42
 
@@ -241,7 +242,7 @@ int XSetForeground(Display *dpy, GC gc, unsigned long foreground) {
     req[0] = X_ChangeGC | (4 << 16);
     req[1] = (uint32_t)(uintptr_t)gc;
     req[2] = 0x04; // foreground
-    req[3] = (uint32_t)foreground;
+    req[3] = foreground;
     // Mock CreateGC if gc is 1
     static bool gc_initialized = false;
     if (!gc_initialized) {
@@ -262,8 +263,73 @@ int XSetFont(Display *dpy, GC gc, Font font) {
     req[0] = X_ChangeGC | (4 << 16);
     req[1] = (uint32_t)(uintptr_t)gc;
     req[2] = 0x4000; // font
-    req[3] = (uint32_t)font;
+    req[3] = font;
     dpy->client->write((uint8_t *)req, 16);
+    return 1;
+}
+
+XImage *XGetImage(Display *dpy, Drawable d, int x, int y, unsigned int width, unsigned int height, unsigned long plane_mask, int format) {
+    uint32_t req[5];
+    req[0] = X_GetImage | (5 << 16);
+    req[0] |= (format << 8);
+    req[1] = (uint32_t)d;
+    req[2] = (x & 0xFFFF) | (y << 16);
+    req[3] = (width & 0xFFFF) | (height << 16);
+    req[4] = (uint32_t)plane_mask;
+
+    std::cout << "XGetImage: sending request" << std::endl;
+    dpy->client->write((uint8_t *)req, 20);
+
+    uint8_t reply[32];
+    if (dpy->client->readBytes((char*)reply, 32) != 32) {
+        std::cout << "XGetImage: failed to read reply" << std::endl;
+        return NULL;
+    }
+
+    uint32_t length = *(uint32_t*)(reply + 4);
+    int data_len = length * 4;
+    std::cout << "XGetImage: reply length " << length << " (data length " << data_len << " bytes)" << std::endl;
+    if (data_len == 0) return NULL;
+
+    char *data = (char*)malloc(data_len);
+    if (!data) return NULL;
+
+    int read_total = 0;
+    while(read_total < data_len) {
+        int n = dpy->client->read((uint8_t*)(data + read_total), data_len - read_total);
+        if (n > 0) {
+            read_total += n;
+        } else if (n < 0) {
+             if (errno == EINTR || errno == EAGAIN) {
+                 usleep(1000);
+                 continue;
+             }
+             std::cout << "XGetImage: read error " << errno << std::endl;
+             break;
+        } else {
+            // EOF usually shouldn't happen unless server closed connection
+            usleep(1000);
+            static int eof_count = 0;
+            if (++eof_count > 100) break;
+        }
+    }
+    std::cout << "XGetImage: read " << read_total << " bytes total" << std::endl;
+
+    XImage *img = (XImage*)malloc(sizeof(XImage));
+    img->width = width;
+    img->height = height;
+    img->data = data;
+    img->depth = reply[1];
+    img->bits_per_pixel = 32;
+    img->bytes_per_line = width * 4;
+    return img;
+}
+
+int XDestroyImage(XImage *img) {
+    if (img) {
+        if (img->data) free(img->data);
+        free(img);
+    }
     return 1;
 }
 
@@ -273,7 +339,10 @@ int XPending(Display *dpy) {
 
 int XNextEvent(Display *dpy, XEvent *event) {
     uint8_t buf[32];
-    if (dpy->client->readBytes((char*)buf, 32) != 32) return 0;
+    int n = dpy->client->readBytes((char*)buf, 32);
+    if (n != 32) {
+        return 0;
+    }
     event->type = buf[0] & 0x7F;
     if (event->type == Expose) {
         event->xexpose.window = *(uint32_t*)(buf + 4);

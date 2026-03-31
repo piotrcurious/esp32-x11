@@ -24,20 +24,15 @@ XFontStruct *font;
 void setupWiFi() {
   Serial.println("setupWiFi...");
   Serial.begin(115200);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
 
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
   }
 
-  Serial.println();
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
 
@@ -59,11 +54,9 @@ void setupX11() {
   Serial.println("Display opened. Getting screen...");
   // Get the default screen and create a graphics context
   my_screen = DefaultScreen(display);
-  Serial.print("Screen number: "); Serial.println((long)my_screen);
 
   Serial.println("Creating GC...");
   gc = DefaultGC(display, my_screen);
-  Serial.print("GC: "); Serial.println((long)(uintptr_t)gc);
 
   Serial.println("Creating window...");
   // Create a simple window with black background and white border
@@ -98,23 +91,9 @@ void setupX11() {
 
 // Draw text on the window
 void drawText(const char* text) {
-  // Get the text width and height
-  int text_width = XTextWidth(font, text, strlen(text));
-  int text_height = font->ascent + font->descent;
-
-  // Get the window width and height
-  XWindowAttributes wa;
-  XGetWindowAttributes(display, window, &wa);
-  int win_width = wa.width;
-  int win_height = wa.height;
-
-  // Calculate the text position to center it on the window
-  int x = (win_width - text_width) / 2;
-  int y = (win_height - text_height) / 2 + font->ascent;
-
   // Set the foreground color to white and draw the text
   XSetForeground(display, gc, WhitePixel(display, my_screen));
-  XDrawString(display, window, gc, x, y, text, strlen(text));
+  XDrawString(display, window, gc, 50, 50, text, strlen(text));
 }
 
 // Handle X11 events
